@@ -1,0 +1,16 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+
+    container_name: vanta-backend
+
+    ports:
+      - "8000:8000"
+
+    volumes:
+      - ./backend/vanta.db:/app/vanta.db
+      - ./reports:/app/reports
+
+    restart: unless-stopped
