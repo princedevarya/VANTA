@@ -6,6 +6,11 @@ from app.models.evidence import Evidence
 from app.models.finding import Finding
 from app.models.service import Service
 from app.models.asset_relationship import AssetRelationship
+from app.models.attack_path import AttackPath
+from app.models.attack_path_step import AttackPathStep
+from app.models.technology import Technology
+from app.models.finding_evidence import FindingEvidence
+
 
 __all__ = [
     "Engagement",
@@ -16,4 +21,8 @@ __all__ = [
     "Finding",
     "Service",
     "AssetRelationship",
+    "AttackPath",
+    "AttackPathStep",
+    "Technology",
+    "FindingEvidence",
 ]

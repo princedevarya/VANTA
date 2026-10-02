@@ -58,10 +58,47 @@ const TESTING_TAXONOMY = {
   ],
 } as const;
 
-const EXECUTABLE_TEST = {
+const EXECUTABLE_TESTS = new Set([
+  "recon:dns",
+  "recon:subdomain_discovery",
+  "recon:technology_discovery",
+  "network:port_enumeration",
+  "network:service_enumeration",
+  "network:network_configuration",
+  "web:authentication",
+  "web:authorization",
+  "web:session_management",
+  "web:input_validation",
+  "web:business_logic",
+  "api:authentication",
+  "api:authorization",
+  "api:object_level_authorization",
+  "api:rate_limiting",
+  "api:input_validation",
+]);
+
+const DEFAULT_EXECUTABLE_TEST = {
   area: "network",
   test: "service_enumeration",
 } as const;
+
+function executionToolFor(item: {
+  area: string;
+  test: string;
+}): "nmap" | "mock" {
+  return item.area === "network" &&
+    (item.test === "port_enumeration" ||
+      item.test === "service_enumeration")
+    ? "nmap"
+    : "mock";
+}
+
+function isExecutableTest(item: {
+  area: string;
+  test: string;
+}) {
+  return EXECUTABLE_TESTS.has(`${item.area}:${item.test}`);
+}
 
 type View =
   | "overview"
@@ -555,6 +592,21 @@ function App() {
       "all" | "include" | "exclude" | "unknown"
     >("all");
 
+  const [reportContent, setReportContent] =
+    React.useState("");
+
+  const [reportFilename, setReportFilename] =
+    React.useState("VANTA_report.md");
+
+  const [reportLoading, setReportLoading] =
+    React.useState(false);
+
+  const [reportError, setReportError] =
+    React.useState<string | null>(null);
+
+  const [reportGeneratedAt, setReportGeneratedAt] =
+    React.useState<string | null>(null);
+
   const [coverageTrace, setCoverageTrace] =
     React.useState<CoverageTraceability | null>(null);
 
@@ -575,8 +627,8 @@ function App() {
       area: string;
       test: string;
     }>({
-      area: EXECUTABLE_TEST.area,
-      test: EXECUTABLE_TEST.test,
+      area: DEFAULT_EXECUTABLE_TEST.area,
+      test: DEFAULT_EXECUTABLE_TEST.test,
     });
 
   const [testingTrace, setTestingTrace] =
@@ -773,6 +825,53 @@ function App() {
   }, [view]);
 
   React.useEffect(() => {
+    if (view !== "reports") {
+      return;
+    }
+
+    async function loadReport() {
+      try {
+        setReportLoading(true);
+        setReportError(null);
+
+        const response = await fetch(
+          `${API_BASE}/engagements/${ENGAGEMENT_ID}/report`,
+        );
+
+        if (!response.ok) {
+          throw new Error(
+            `Report generation failed: ${response.status}`,
+          );
+        }
+
+        const content = await response.text();
+        const disposition = response.headers.get(
+          "content-disposition",
+        );
+
+        const filenameMatch = disposition?.match(
+          /filename="?([^";]+)"?/i,
+        );
+
+        setReportContent(content);
+        setReportFilename(
+          filenameMatch?.[1] ?? "VANTA_report.md",
+        );
+        setReportGeneratedAt(new Date().toISOString());
+      } catch (err) {
+        console.error(err);
+        setReportError(
+          "Unable to generate the assessment report",
+        );
+      } finally {
+        setReportLoading(false);
+      }
+    }
+
+    loadReport();
+  }, [view]);
+
+  React.useEffect(() => {
     if (view !== "attack-surface") {
       return;
     }
@@ -843,6 +942,45 @@ function App() {
     }
 
     loadAttackSurface();
+  }, [view]);
+
+  React.useEffect(() => {
+    if (view !== "testing") {
+      return;
+    }
+
+    async function loadTestingWorkspace() {
+      try {
+        const [assetsData, scopesData] = await Promise.all([
+          fetchJson<Asset[]>(
+            `/engagements/${ENGAGEMENT_ID}/assets`,
+          ),
+          fetchJson<Scope[]>(
+            `/engagements/${ENGAGEMENT_ID}/scope`,
+          ),
+        ]);
+
+        setAssets(assetsData);
+        setScopes(scopesData);
+
+        if (assetsData.length > 0) {
+          setTestAssetId((current) =>
+            current && assetsData.some((asset) => asset.id === current)
+              ? current
+              : assetsData[0].id,
+          );
+        } else {
+          setTestAssetId(null);
+        }
+
+        setTestError(null);
+      } catch (err) {
+        console.error(err);
+        setTestError("Unable to load assessment assets and scope");
+      }
+    }
+
+    loadTestingWorkspace();
   }, [view]);
 
   React.useEffect(() => {
@@ -1403,6 +1541,7 @@ function App() {
 
   React.useEffect(() => {
     setTestTitle(coverageTestLabel(selectedTestingItem.test));
+    setTestTool(executionToolFor(selectedTestingItem));
   }, [selectedTestingItem]);
 
   React.useEffect(() => {
@@ -1414,6 +1553,64 @@ function App() {
       setTestAssetId(assets[0].id);
     }
   }, [assets, testAssetId]);
+
+  async function refreshReport() {
+    try {
+      setReportLoading(true);
+      setReportError(null);
+
+      const response = await fetch(
+        `${API_BASE}/engagements/${ENGAGEMENT_ID}/report`,
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          `Report generation failed: ${response.status}`,
+        );
+      }
+
+      const content = await response.text();
+      const disposition = response.headers.get(
+        "content-disposition",
+      );
+      const filenameMatch = disposition?.match(
+        /filename="?([^";]+)"?/i,
+      );
+
+      setReportContent(content);
+      setReportFilename(
+        filenameMatch?.[1] ?? reportFilename,
+      );
+      setReportGeneratedAt(new Date().toISOString());
+    } catch (err) {
+      console.error(err);
+      setReportError(
+        "Unable to generate the assessment report",
+      );
+    } finally {
+      setReportLoading(false);
+    }
+  }
+
+  function downloadReport() {
+    if (!reportContent) {
+      return;
+    }
+
+    const blob = new Blob(
+      [reportContent],
+      { type: "text/markdown;charset=utf-8" },
+    );
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+
+    anchor.href = url;
+    anchor.download = reportFilename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  }
 
   async function executeTest() {
     if (!testAssetId) {
@@ -1438,6 +1635,8 @@ function App() {
             asset_id: testAssetId,
             tool: testTool,
             title: testTitle,
+            testing_area: selectedTestingItem.area,
+            test_type: selectedTestingItem.test,
           }),
         },
       );
@@ -3111,8 +3310,7 @@ function App() {
                         VIEW TRACEABILITY
                       </button>
 
-                      {selectedTestingItem.area === EXECUTABLE_TEST.area &&
-                      selectedTestingItem.test === EXECUTABLE_TEST.test ? (
+                      {isExecutableTest(selectedTestingItem) ? (
                         <span className="testing-adapter-ready">
                           <Radio size={14} />
                           EXECUTION ADAPTER READY
@@ -3162,7 +3360,16 @@ function App() {
                         setTestTool(event.target.value as "nmap" | "mock")
                       }
                     >
-                      <option value="nmap">Nmap</option>
+                      <option
+                        value="nmap"
+                        disabled={
+                          selectedTestingItem.area !== "network" ||
+                          (selectedTestingItem.test !== "port_enumeration" &&
+                            selectedTestingItem.test !== "service_enumeration")
+                        }
+                      >
+                        Nmap
+                      </option>
                       <option value="mock">Mock adapter</option>
                     </select>
                   </label>
@@ -3212,18 +3419,16 @@ function App() {
                   disabled={
                     testRunning ||
                     !testAssetId ||
-                    selectedTestingItem.area !== EXECUTABLE_TEST.area ||
-                    selectedTestingItem.test !== EXECUTABLE_TEST.test
+                    !isExecutableTest(selectedTestingItem)
                   }
                 >
                   <Terminal size={17} />
                   {testRunning ? "EXECUTING TEST..." : "EXECUTE TEST"}
                 </button>
 
-                {selectedTestingItem.area !== EXECUTABLE_TEST.area ||
-                selectedTestingItem.test !== EXECUTABLE_TEST.test ? (
+                {!isExecutableTest(selectedTestingItem) ? (
                   <p className="testing-adapter-note">
-                    This workflow objective is already part of VANTA's testing model, but its execution adapter is not connected yet. It cannot be executed as a different test type through the current tool endpoint.
+                    This workflow objective is not connected to an execution adapter yet.
                   </p>
                 ) : (
                   <div className="testing-pipeline">
@@ -4873,6 +5078,248 @@ function App() {
                   </section>
                 </div>
               </>
+            )}
+          </section>
+        )}
+
+
+        {view === "reports" && (
+          <section
+            className="page"
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 18,
+            }}
+          >
+            <div className="surface-hero">
+              <div>
+                <div className="eyebrow">
+                  <FileText size={12} />
+                  ASSESSMENT OUTPUT
+                </div>
+                <h1>Penetration Testing Report</h1>
+                <p>
+                  Generate a traceable assessment report from the current
+                  engagement data, including scope, coverage, findings,
+                  evidence, retesting, and activity history.
+                </p>
+              </div>
+
+              <div className="surface-metrics">
+                <div>
+                  <strong>
+                    {dashboard.findings.total.toString().padStart(2, "0")}
+                  </strong>
+                  <span>FINDINGS</span>
+                </div>
+                <div>
+                  <strong>
+                    {dashboard.evidence_items.toString().padStart(2, "0")}
+                  </strong>
+                  <span>EVIDENCE</span>
+                </div>
+                <div>
+                  <strong>
+                    {coveragePercent}%
+                  </strong>
+                  <span>COVERAGE</span>
+                </div>
+              </div>
+            </div>
+
+            {reportError && (
+              <div className="error-banner">
+                <AlertTriangle size={16} />
+                {reportError}
+              </div>
+            )}
+
+            <section className="panel" style={{ padding: 22 }}>
+              <div
+                className="panel-header"
+                style={{ alignItems: "center" }}
+              >
+                <div>
+                  <span className="panel-kicker">REPORT CONTROL</span>
+                  <h2>Assessment Deliverable</h2>
+                  <div
+                    style={{
+                      marginTop: 6,
+                      fontSize: 10,
+                      opacity: 0.55,
+                    }}
+                  >
+                    {reportFilename}
+                    {reportGeneratedAt
+                      ? ` · generated ${formatActivityTime(reportGeneratedAt)}`
+                      : ""}
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    flexWrap: "wrap",
+                    justifyContent: "flex-end",
+                  }}
+                >
+                  <button
+                    type="button"
+                    className="primary-button"
+                    onClick={refreshReport}
+                    disabled={reportLoading}
+                    style={{
+                      minWidth: 150,
+                      opacity: reportLoading ? 0.6 : 1,
+                    }}
+                  >
+                    <FileText size={14} />
+                    {reportLoading ? "GENERATING..." : "GENERATE REPORT"}
+                  </button>
+
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={downloadReport}
+                    disabled={!reportContent || reportLoading}
+                    style={{
+                      minWidth: 150,
+                      opacity: !reportContent || reportLoading ? 0.45 : 1,
+                    }}
+                  >
+                    <FileText size={14} />
+                    DOWNLOAD MARKDOWN
+                  </button>
+                </div>
+              </div>
+            </section>
+
+            {reportLoading && !reportContent ? (
+              <section className="panel" style={{ padding: 22 }}>
+                <div className="surface-loading" style={{ minHeight: 280 }}>
+                  <div className="loading-pulse" />
+                  <strong>GENERATING ASSESSMENT REPORT</strong>
+                  <span>Collecting scope, coverage, findings, evidence, and activity provenance...</span>
+                </div>
+              </section>
+            ) : reportContent ? (
+              <>
+                <section className="panel" style={{ padding: 0, overflow: "hidden" }}>
+                  <div
+                    className="panel-header"
+                    style={{
+                      padding: "18px 22px",
+                      borderBottom: "1px solid rgba(255,255,255,0.07)",
+                    }}
+                  >
+                    <div>
+                      <span className="panel-kicker">DOCUMENT PREVIEW</span>
+                      <h2>VANTA Report</h2>
+                    </div>
+                    <span className="service-total">MARKDOWN</span>
+                  </div>
+
+                  <div
+                    style={{
+                      margin: 18,
+                      border: "1px solid rgba(255,255,255,0.08)",
+                      background: "#0b0d0f",
+                      borderRadius: 8,
+                      overflow: "hidden",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 7,
+                        padding: "9px 12px",
+                        borderBottom: "1px solid rgba(255,255,255,0.06)",
+                        background: "rgba(255,255,255,0.025)",
+                      }}
+                    >
+                      <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#6fba8b" }} />
+                      <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#b18a5a" }} />
+                      <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#b84b4b" }} />
+                      <span
+                        style={{
+                          marginLeft: 8,
+                          fontFamily: '"JetBrains Mono", monospace',
+                          fontSize: 8,
+                          opacity: 0.45,
+                        }}
+                      >
+                        {reportFilename}
+                      </span>
+                    </div>
+
+                    <pre
+                      style={{
+                        margin: 0,
+                        padding: 22,
+                        maxHeight: 760,
+                        overflow: "auto",
+                        color: "#c3c8ce",
+                        fontFamily: '"JetBrains Mono", monospace',
+                        fontSize: 9,
+                        lineHeight: 1.75,
+                        whiteSpace: "pre-wrap",
+                        wordBreak: "break-word",
+                      }}
+                    >
+                      {reportContent}
+                    </pre>
+                  </div>
+                </section>
+
+                <section className="panel" style={{ padding: 22 }}>
+                  <div className="panel-header">
+                    <div>
+                      <span className="panel-kicker">REPORT INTEGRITY</span>
+                      <h2>Evidence-backed output</h2>
+                    </div>
+                  </div>
+
+                  <div
+                    className="finding-provenance-chain"
+                    style={{ marginTop: 16 }}
+                  >
+                    <div className="finding-provenance-step active">
+                      <ShieldCheck size={13} />
+                      <span>SCOPE</span>
+                      <small>RECORDED</small>
+                    </div>
+                    <ChevronRight size={13} />
+                    <div className="finding-provenance-step active">
+                      <Activity size={13} />
+                      <span>TESTING</span>
+                      <small>{dashboard.activities} ACTIVITIES</small>
+                    </div>
+                    <ChevronRight size={13} />
+                    <div className="finding-provenance-step active">
+                      <Fingerprint size={13} />
+                      <span>EVIDENCE</span>
+                      <small>{dashboard.evidence_items} ITEMS</small>
+                    </div>
+                    <ChevronRight size={13} />
+                    <div className="finding-provenance-step active">
+                      <AlertTriangle size={13} />
+                      <span>FINDINGS</span>
+                      <small>{dashboard.findings.total} RECORDED</small>
+                    </div>
+                  </div>
+                </section>
+              </>
+            ) : (
+              <section className="panel" style={{ padding: 22 }}>
+                <div className="detail-empty" style={{ minHeight: 260 }}>
+                  <FileText size={32} />
+                  <strong>Report not generated</strong>
+                  <span>Generate the current assessment report to inspect and download the final Markdown deliverable.</span>
+                </div>
+              </section>
             )}
           </section>
         )}

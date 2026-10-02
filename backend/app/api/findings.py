@@ -8,12 +8,14 @@ from app.models.asset import Asset
 from app.models.engagement import Engagement
 from app.models.evidence import Evidence
 from app.models.finding import Finding
+from app.models.finding_evidence import FindingEvidence
 from app.schemas.finding import (
     FindingCreate,
     FindingResponse,
     FindingUpdate,
     RetestResult,
 )
+
 
 router = APIRouter(
     prefix="/api/v1/engagements",
@@ -322,6 +324,62 @@ async def get_finding_provenance(
             else None
         ),
     }
+
+
+@router.get(
+    "/{engagement_id}/findings/{finding_id}/evidence",
+)
+async def get_finding_evidence(
+    engagement_id: str,
+    finding_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    await get_finding_or_404(
+        db,
+        engagement_id,
+        finding_id,
+    )
+
+    result = await db.execute(
+        select(
+            FindingEvidence,
+            Evidence,
+        )
+        .join(
+            Evidence,
+            Evidence.id == FindingEvidence.evidence_id,
+        )
+        .where(
+            FindingEvidence.finding_id == finding_id,
+            Evidence.engagement_id == engagement_id,
+        )
+        .order_by(
+            FindingEvidence.created_at.asc()
+        )
+    )
+
+    rows = result.all()
+
+    return [
+        {
+            "id": relationship.id,
+            "finding_id": relationship.finding_id,
+            "evidence_id": relationship.evidence_id,
+            "relationship_type": relationship.relationship_type,
+            "created_at": relationship.created_at,
+            "evidence": {
+                "id": evidence.id,
+                "activity_id": evidence.activity_id,
+                "asset_id": evidence.asset_id,
+                "evidence_type": evidence.evidence_type,
+                "title": evidence.title,
+                "content": evidence.content,
+                "file_path": evidence.file_path,
+                "created_at": evidence.created_at,
+            },
+        }
+        for relationship, evidence in rows
+    ]
 
 
 @router.patch(

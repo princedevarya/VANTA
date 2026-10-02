@@ -6,3 +6,5 @@ class ToolEventCreate(BaseModel):
     asset_id: str | None = None
     tool: str
     title: str
+    testing_area: str | None = None
+    test_type: str | None = None

@@ -13,6 +13,8 @@ from app.models import (
     Scope,
     Service,
     AssetRelationship,
+    AttackPath,
+    AttackPathStep,
 )
 from app.api.assets import router as asset_router
 from app.api.activities import router as activity_router
