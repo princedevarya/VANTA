@@ -80,6 +80,7 @@ const EXECUTABLE_TESTS = new Set([
   "recon:technology_discovery",
   "network:port_enumeration",
   "network:service_enumeration",
+  "network:network_configuration",
   "web:endpoint_discovery",
 ]);
 
@@ -107,7 +108,8 @@ function executionToolFor(item: {
   if (
     item.area === "network" &&
     (item.test === "port_enumeration" ||
-      item.test === "service_enumeration")
+      item.test === "service_enumeration" ||
+      item.test === "network_configuration")
   ) {
     return "nmap";
   }

@@ -2,22 +2,55 @@ import json
 from urllib.parse import urlsplit
 
 
-MAX_ENDPOINTS = 2000
+def _parse_status_code(value):
+    if value is None:
+        return None
+
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _safe_string(value):
+    if value is None:
+        return None
+
+    if isinstance(value, str):
+        value = value.strip()
+        return value or None
+
+    return str(value)
 
 
 def parse_katana_output(output: str) -> dict:
+    """
+    Parse Katana JSONL output.
+
+    The adapter controls the maximum amount of raw output that
+    reaches this parser. This function therefore focuses on
+    extracting normalized endpoint inventory records.
+
+    Duplicate endpoints are removed using:
+        METHOD + URL
+    """
+
     endpoints: list[dict] = []
+
     seen: set[tuple[str, str]] = set()
 
     parsed_records = 0
     invalid_records = 0
     duplicate_records = 0
-    endpoint_limit_reached = False
 
     for line in output.splitlines():
         line = line.strip()
 
-        if not line or line.startswith("[stderr]"):
+        if not line:
+            continue
+
+        # Adapter may append stderr after stdout.
+        if line.startswith("[stderr]"):
             continue
 
         try:
@@ -40,48 +73,55 @@ def parse_katana_output(output: str) -> dict:
 
         url = request.get("endpoint")
 
-        if not isinstance(url, str) or not url.strip():
+        if not isinstance(url, str):
             invalid_records += 1
             continue
 
         url = url.strip()
 
-        method = request.get("method", "GET")
+        if not url:
+            invalid_records += 1
+            continue
+
+        method = request.get(
+            "method",
+            "GET",
+        )
 
         if not isinstance(method, str):
             method = "GET"
 
-        method = method.upper()
+        method = method.upper().strip()
 
-        dedupe_key = (method, url)
+        if not method:
+            method = "GET"
+
+        dedupe_key = (
+            method,
+            url,
+        )
 
         if dedupe_key in seen:
             duplicate_records += 1
             continue
 
-        if len(endpoints) >= MAX_ENDPOINTS:
-            endpoint_limit_reached = True
-            break
-
         seen.add(dedupe_key)
 
-        parsed_url = urlsplit(url)
+        try:
+            parsed_url = urlsplit(url)
+            port = parsed_url.port
+        except ValueError:
+            invalid_records += 1
+            continue
 
         response = record.get("response")
 
         if not isinstance(response, dict):
             response = {}
 
-        status_code = response.get("status_code")
-
-        try:
-            status_code = (
-                int(status_code)
-                if status_code is not None
-                else None
-            )
-        except (TypeError, ValueError):
-            status_code = None
+        status_code = _parse_status_code(
+            response.get("status_code")
+        )
 
         headers = response.get("headers")
 
@@ -91,18 +131,54 @@ def parse_katana_output(output: str) -> dict:
         endpoint = {
             "url": url,
             "method": method,
-            "scheme": parsed_url.scheme or None,
-            "host": parsed_url.hostname,
-            "port": parsed_url.port,
-            "path": parsed_url.path or "/",
-            "query": parsed_url.query or None,
+
+            "scheme": (
+                parsed_url.scheme
+                or None
+            ),
+
+            "host": (
+                parsed_url.hostname
+                or None
+            ),
+
+            "port": port,
+
+            "path": (
+                parsed_url.path
+                or "/"
+            ),
+
+            "query": (
+                parsed_url.query
+                or None
+            ),
+
             "status_code": status_code,
-            "content_type": headers.get("Content-Type"),
-            "server": headers.get("Server"),
-            "source_url": request.get("source"),
-            "tag": request.get("tag"),
-            "attribute": request.get("attribute"),
-            "timestamp": record.get("timestamp"),
+
+            "content_type": _safe_string(
+                headers.get("Content-Type")
+            ),
+
+            "server": _safe_string(
+                headers.get("Server")
+            ),
+
+            "source_url": _safe_string(
+                request.get("source")
+            ),
+
+            "tag": _safe_string(
+                request.get("tag")
+            ),
+
+            "attribute": _safe_string(
+                request.get("attribute")
+            ),
+
+            "timestamp": _safe_string(
+                record.get("timestamp")
+            ),
         }
 
         endpoints.append(endpoint)
@@ -113,6 +189,4 @@ def parse_katana_output(output: str) -> dict:
         "parsed_records": parsed_records,
         "invalid_records": invalid_records,
         "duplicate_records": duplicate_records,
-        "endpoint_limit": MAX_ENDPOINTS,
-        "endpoint_limit_reached": endpoint_limit_reached,
     }

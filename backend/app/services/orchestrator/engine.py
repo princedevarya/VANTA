@@ -5,6 +5,7 @@ from app.services.asset_discovery import (
     get_or_create_discovery_seed,
     store_discovered_subdomains,
 )
+from app.services.endpoint_inventory import store_discovered_endpoints
 from app.services.event_engine import process_tool_result
 from app.services.parsers.registry import get_parser
 from app.services.target_resolver import (
@@ -36,7 +37,15 @@ async def execute_tool(
 
     Testing mode:
         asset_id -> scope validation -> Asset -> tool
+
+    Katana:
+        tool output -> parser -> endpoint inventory
+        while keeping the API response bounded.
     """
+
+    # ---------------------------------------------------------
+    # Resolve execution target
+    # ---------------------------------------------------------
 
     if execution_mode == "discovery":
         if not target:
@@ -77,6 +86,10 @@ async def execute_tool(
             f"Unsupported execution mode: {execution_mode}"
         )
 
+    # ---------------------------------------------------------
+    # Execute adapter
+    # ---------------------------------------------------------
+
     adapter = get_adapter(tool)
 
     result = await adapter.run(
@@ -84,12 +97,20 @@ async def execute_tool(
         test_type=test_type,
     )
 
+    # ---------------------------------------------------------
+    # Parse tool output
+    # ---------------------------------------------------------
+
     parsed: dict = {}
 
     parser = get_parser(tool)
 
     if parser is not None and result.return_code == 0:
         parsed = parser(result.output)
+
+    # ---------------------------------------------------------
+    # Discovery asset handling
+    # ---------------------------------------------------------
 
     discovered_assets = []
 
@@ -106,6 +127,10 @@ async def execute_tool(
             subdomains=parsed.get("subdomains", []),
         )
 
+    # ---------------------------------------------------------
+    # HTTP service handling
+    # ---------------------------------------------------------
+
     http_services = []
 
     if (
@@ -119,28 +144,51 @@ async def execute_tool(
         )
 
     # ---------------------------------------------------------
-    # Katana-specific evidence protection
+    # Katana endpoint inventory
     # ---------------------------------------------------------
-    #
-    # Katana can generate a very large JSONL stream.
-    # The adapter already bounds the captured output.
-    #
-    # Keep the bounded output as evidence, but do not expose
-    # thousands of parsed endpoint objects through the API.
-    #
+
     katana_endpoint_count = 0
-    katana_endpoint_preview = []
+    katana_endpoint_preview: list[dict] = []
+    stored_endpoint_count = 0
 
-    if tool == "katana" and result.return_code == 0:
-        katana_endpoint_count = parsed.get(
-            "endpoint_count",
-            len(parsed.get("endpoints", [])),
-        )
-
-        katana_endpoint_preview = parsed.get(
+    if (
+        tool == "katana"
+        and result.return_code == 0
+        and resolved_asset_id
+    ):
+        katana_endpoints = parsed.get(
             "endpoints",
             [],
-        )[:KATANA_RESPONSE_ENDPOINT_LIMIT]
+        )
+
+        katana_endpoint_count = parsed.get(
+            "endpoint_count",
+            len(katana_endpoints),
+        )
+
+        # Persist ALL parsed endpoints into the VANTA endpoint
+        # inventory. The inventory layer handles deduplication.
+        if katana_endpoints:
+            stored_endpoints = await store_discovered_endpoints(
+                db,
+                engagement_id=engagement_id,
+                asset_id=resolved_asset_id,
+                parsed_result={
+                    "endpoints": katana_endpoints,
+                },
+            )
+
+            stored_endpoint_count = len(stored_endpoints)
+
+        # Never return the complete endpoint inventory through
+        # the API response. Keep the response bounded.
+        katana_endpoint_preview = katana_endpoints[
+            :KATANA_RESPONSE_ENDPOINT_LIMIT
+        ]
+
+    # ---------------------------------------------------------
+    # Activity + evidence + findings
+    # ---------------------------------------------------------
 
     processed = await process_tool_result(
         db,
@@ -152,16 +200,30 @@ async def execute_tool(
         result=result,
     )
 
+    # ---------------------------------------------------------
+    # API response
+    # ---------------------------------------------------------
+
     return {
         "tool": result.tool,
         "target": execution_target,
         "command": result.command,
         "return_code": result.return_code,
-        "output": result.output if tool != "katana" else None,
+
+        # Katana raw output is intentionally not returned because
+        # it can be very large.
+        "output": (
+            result.output
+            if tool != "katana"
+            else None
+        ),
+
         "metadata": result.metadata,
+
         "activity": processed["activity"],
         "evidence": processed["evidence"],
         "findings": processed["findings"],
+
         "parsed": (
             {
                 **parsed,
@@ -170,13 +232,18 @@ async def execute_tool(
             if tool == "katana"
             else parsed
         ),
+
         "http_services": http_services,
         "discovered_assets": discovered_assets,
+
         "asset_id": resolved_asset_id,
         "execution_mode": execution_mode,
         "testing_area": testing_area,
         "test_type": test_type,
+
+        # Katana inventory information.
         "endpoint_count": katana_endpoint_count,
+        "stored_endpoint_count": stored_endpoint_count,
         "endpoint_preview_count": len(
             katana_endpoint_preview
         ),

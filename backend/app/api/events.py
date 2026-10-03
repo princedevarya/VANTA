@@ -339,6 +339,7 @@ async def create_tool_event(
                 if test_type not in {
                     "port_enumeration",
                     "service_enumeration",
+                    "network_configuration",
                 }:
                     raise ValueError(
                         f"nmap does not support testing type: {test_type}"

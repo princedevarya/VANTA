@@ -6,11 +6,53 @@ services:
 
     container_name: vanta-backend
 
+    expose:
+      - "8000"
+
     ports:
       - "8000:8000"
 
+    environment:
+      VANTA_ENV: ${VANTA_ENV:-development}
+      VANTA_DATABASE_URL: ${VANTA_DATABASE_URL:-sqlite+aiosqlite:///./data/vanta.db}
+
     volumes:
-      - ./backend/vanta.db:/app/vanta.db
+      - vanta_data:/app/data
       - ./reports:/app/reports
 
     restart: unless-stopped
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health')"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: /api/v1
+
+    container_name: vanta-frontend
+
+    ports:
+      - "5173:80"
+
+    depends_on:
+      backend:
+        condition: service_healthy
+
+    restart: unless-stopped
+
+volumes:
+  vanta_data:
+    name: vanta_data
