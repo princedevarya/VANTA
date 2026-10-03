@@ -13,6 +13,7 @@ from app.models import (
     Service,
 )
 from app.services.coverage import get_testing_coverage
+from app.services.asset_discovery import normalize_domain, wildcard_matches
 
 
 router = APIRouter(
@@ -179,29 +180,45 @@ async def get_attack_surface_summary(
 
     scopes = scopes_result.scalars().all()
 
-    included_targets = {
-        scope.target
+    include_scopes = [
+        scope
         for scope in scopes
         if scope.scope_type == "include"
-    }
+    ]
 
-    excluded_targets = {
-        scope.target
+    exclude_scopes = [
+        scope
         for scope in scopes
         if scope.scope_type == "exclude"
-    }
+    ]
+
+    def is_excluded(asset_value: str) -> bool:
+        normalized_value = normalize_domain(asset_value)
+
+        return any(
+            wildcard_matches(scope.target, normalized_value)
+            for scope in exclude_scopes
+        )
+
+    def is_included(asset_value: str) -> bool:
+        normalized_value = normalize_domain(asset_value)
+
+        return any(
+            wildcard_matches(scope.target, normalized_value)
+            for scope in include_scopes
+        )
 
     in_scope_assets = [
         asset
         for asset in assets
-        if asset.value in included_targets
-        and asset.value not in excluded_targets
+        if is_included(asset.value)
+        and not is_excluded(asset.value)
     ]
 
     excluded_assets = [
         asset
         for asset in assets
-        if asset.value in excluded_targets
+        if is_excluded(asset.value)
     ]
 
     services_result = await db.execute(

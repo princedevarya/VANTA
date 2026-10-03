@@ -26,25 +26,7 @@ import {
 
 import "./App.css";
 
-const API_BASE =
-  import.meta.env.VITE_API_BASE_URL || "/api/v1";
-
-type ToolName =
-  | "subfinder"
-  | "httpx"
-  | "nmap"
-  | "katana"
-  | "dns"
-  | "mock";
-
-type EngagementSummary = {
-  id: string;
-  name: string;
-  client: string;
-  status: string;
-  description: string | null;
-  created_at: string;
-};
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "/api/v1";
 
 const TESTING_TAXONOMY = {
   recon: [
@@ -80,7 +62,18 @@ const EXECUTABLE_TESTS = new Set([
   "recon:technology_discovery",
   "network:port_enumeration",
   "network:service_enumeration",
+  "network:network_configuration",
   "web:endpoint_discovery",
+  "web:authentication",
+  "web:authorization",
+  "web:session_management",
+  "web:input_validation",
+  "web:business_logic",
+  "api:authentication",
+  "api:authorization",
+  "api:object_level_authorization",
+  "api:rate_limiting",
+  "api:input_validation",
 ]);
 
 const DEFAULT_EXECUTABLE_TEST = {
@@ -91,17 +84,12 @@ const DEFAULT_EXECUTABLE_TEST = {
 function executionToolFor(item: {
   area: string;
   test: string;
-}): ToolName {
-  if (item.area === "recon" && item.test === "dns") {
-    return "dns";
-  }
-
-  if (item.area === "recon" && item.test === "subdomain_discovery") {
-    return "subfinder";
-  }
-
-  if (item.area === "recon" && item.test === "technology_discovery") {
-    return "httpx";
+}): "nmap" | "mock" | "katana" {
+  if (
+    item.area === "web" &&
+    item.test === "endpoint_discovery"
+  ) {
+    return "katana";
   }
 
   if (
@@ -112,33 +100,7 @@ function executionToolFor(item: {
     return "nmap";
   }
 
-  if (item.area === "web" && item.test === "endpoint_discovery") {
-    return "katana";
-  }
-
   return "mock";
-}
-
-function toolDisplayName(tool: ToolName) {
-  switch (tool) {
-    case "subfinder": return "SUBFINDER";
-    case "httpx": return "HTTPX";
-    case "nmap": return "NMAP";
-    case "katana": return "KATANA";
-    case "dns": return "DNS";
-    default: return "NO ADAPTER";
-  }
-}
-
-function toolDescription(tool: ToolName) {
-  switch (tool) {
-    case "subfinder": return "Passive subdomain enumeration";
-    case "httpx": return "HTTP probing and technology discovery";
-    case "nmap": return "Network port and service enumeration";
-    case "katana": return "Web crawling and endpoint discovery";
-    case "dns": return "DNS A-record discovery";
-    default: return "This objective is not connected to an execution adapter yet.";
-  }
 }
 
 function isExecutableTest(item: {
@@ -147,6 +109,15 @@ function isExecutableTest(item: {
 }) {
   return EXECUTABLE_TESTS.has(`${item.area}:${item.test}`);
 }
+
+type Engagement = {
+  id: string;
+  name: string;
+  client: string | null;
+  description: string | null;
+  status: string;
+  created_at: string;
+};
 
 type View =
   | "overview"
@@ -186,6 +157,22 @@ type Service = {
   port: number;
   protocol: string;
   state: string;
+  created_at: string;
+};
+
+type HttpService = {
+  id: string;
+  engagement_id: string;
+  asset_id: string;
+  url: string;
+  scheme: string | null;
+  host: string | null;
+  port: number | null;
+  status_code: number | null;
+  title: string | null;
+  webserver: string | null;
+  source_activity_id: string | null;
+  source_evidence_id: string | null;
   created_at: string;
 };
 
@@ -284,23 +271,16 @@ type ToolEventResponse = {
   return_code: number;
   activity_id: string;
   evidence_id: string;
-  activity?: {
-    id?: string;
-  };
-  evidence?: {
-    id?: string;
-  };
   testing_area: string | null;
   test_type: string | null;
-  dns_records?: Array<{
-    name: string;
-    ttl: string;
-    class: string;
-    type: string;
-    value: string;
+  discovered_services: Array<{
+    id: string;
+    port: number;
+    protocol: string;
+    state: string;
+    service: string;
   }>;
-  dns_record_count?: number;
-  endpoints?: Array<{
+  endpoints: Array<{
     id: string;
     engagement_id?: string;
     asset_id?: string;
@@ -310,13 +290,16 @@ type ToolEventResponse = {
     host: string | null;
     port: number | null;
     path: string | null;
-  }>;
-  discovered_services: Array<{
-    id: string;
-    port: number;
-    protocol: string;
-    state: string;
-    service: string;
+    query: string | null;
+    status_code: number | null;
+    content_type: string | null;
+    server: string | null;
+    source_url: string | null;
+    tag: string | null;
+    attribute: string | null;
+    source_activity_id: string | null;
+    source_evidence_id: string | null;
+    created_at?: string;
   }>;
 };
 
@@ -410,11 +393,10 @@ type Dashboard = {
 const fallbackDashboard: Dashboard = {
   engagement: {
     id: "",
-    name: "ACME Web Application Pentest",
-    client: "ACME Corporation",
-    status: "active",
-    description:
-      "External web application security assessment",
+    name: "No engagement selected",
+    client: "",
+    status: "inactive",
+    description: "Create or select an engagement to begin.",
     created_at: "",
   },
 
@@ -459,19 +441,8 @@ async function fetchJson<T>(
   );
 
   if (!response.ok) {
-    let detail = "";
-
-    try {
-      const payload = await response.json();
-      if (typeof payload?.detail === "string") {
-        detail = ` — ${payload.detail}`;
-      }
-    } catch {
-      // Keep the HTTP status as the useful fallback.
-    }
-
     throw new Error(
-      `API request failed: ${response.status}${detail}`,
+      `API request failed: ${response.status}`,
     );
   }
 
@@ -543,19 +514,35 @@ function App() {
   const [view, setView] =
     React.useState<View>("overview");
 
-  const [activeEngagementId, setActiveEngagementId] =
+  const [engagements, setEngagements] =
+    React.useState<Engagement[]>([]);
+
+  const [selectedEngagementId, setSelectedEngagementId] =
     React.useState<string | null>(null);
 
-  const [engagementLoading, setEngagementLoading] =
+  const [engagementsLoading, setEngagementsLoading] =
     React.useState(true);
 
   const [engagementError, setEngagementError] =
     React.useState<string | null>(null);
 
-  const [assessmentTarget, setAssessmentTarget] =
-    React.useState("");
-  const [assessmentStarting, setAssessmentStarting] =
+  const [createEngagementOpen, setCreateEngagementOpen] =
     React.useState(false);
+
+  const [newEngagementName, setNewEngagementName] =
+    React.useState("");
+
+  const [newEngagementClient, setNewEngagementClient] =
+    React.useState("");
+
+  const [newEngagementDescription, setNewEngagementDescription] =
+    React.useState("");
+
+  const [creatingEngagement, setCreatingEngagement] =
+    React.useState(false);
+
+  const engagementId = selectedEngagementId;
+
   const [dashboard, setDashboard] =
     React.useState<Dashboard>(
       fallbackDashboard,
@@ -566,6 +553,9 @@ function App() {
 
   const [services, setServices] =
     React.useState<Service[]>([]);
+
+  const [httpServices, setHttpServices] =
+    React.useState<HttpService[]>([]);
 
   const [scopes, setScopes] =
     React.useState<Scope[]>([]);
@@ -647,7 +637,7 @@ function App() {
     React.useState<string | null>(null);
 
   const [, setLoading] =
-    React.useState(true);
+  React.useState(true);
 
   const [surfaceLoading, setSurfaceLoading] =
     React.useState(false);
@@ -662,7 +652,7 @@ function App() {
     React.useState<string | null>(null);
 
   const [testTool, setTestTool] =
-    React.useState<ToolName>("nmap");
+    React.useState<"nmap" | "mock" | "katana">("nmap");
 
   const [testTitle, setTestTitle] =
     React.useState("Service enumeration");
@@ -726,78 +716,53 @@ function App() {
   const [testingTraceVersion, setTestingTraceVersion] =
     React.useState(0);
 
-  // Target-first startup:
-  // Never silently resume the latest assessment after a browser refresh.
-  // The user must explicitly establish the primary target for this session.
   React.useEffect(() => {
-    setActiveEngagementId(null);
-    setEngagementError(null);
-    setEngagementLoading(false);
+    async function loadEngagements() {
+      try {
+        setEngagementsLoading(true);
+        setEngagementError(null);
+
+        const data = await fetchJson<Engagement[]>("/engagements");
+        setEngagements(data);
+
+        setSelectedEngagementId((current) => {
+          if (current && data.some((item) => item.id === current)) {
+            return current;
+          }
+          return data[0]?.id ?? null;
+        });
+      } catch (err) {
+        console.error(err);
+        setEngagementError(
+          err instanceof Error ? err.message : "Unable to load engagements",
+        );
+      } finally {
+        setEngagementsLoading(false);
+      }
+    }
+
+    loadEngagements();
   }, []);
 
-  async function startAssessment() {
-    const target = assessmentTarget.trim();
-
-    if (!target) {
-      setEngagementError("Enter a primary target before starting the assessment.");
+  React.useEffect(() => {
+    if (!engagementId) {
+      setDashboard(fallbackDashboard);
+      setServices([]);
+      setFindings([]);
+      setAssets([]);
+      setScopes([]);
+      setHttpServices([]);
+      setAssetRelationships([]);
+      setEvidence([]);
+      setActivities([]);
+      setSelectedAssetId(null);
+      setSelectedActivityId(null);
+      setSelectedFindingId(null);
+      setSelectedEvidenceId(null);
+      setTestAssetId(null);
+      setLoading(false);
       return;
     }
-
-    try {
-      setAssessmentStarting(true);
-      setEngagementError(null);
-
-      const data = await fetchJson<{
-        target: string;
-        target_type: string;
-        scheme: string | null;
-        engagement: EngagementSummary;
-        asset: Asset;
-      }>("/assessment/start", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          target,
-        }),
-      });
-
-      if (!data?.engagement?.id) {
-        throw new Error(
-          "Assessment start response did not include an engagement ID.",
-        );
-      }
-
-      if (!data?.asset?.id) {
-        throw new Error(
-          "Assessment start response did not include the primary asset.",
-        );
-      }
-
-      setAssessmentTarget(data.target);
-      setActiveEngagementId(data.engagement.id);
-
-      // Bind the primary asset immediately so the first testing action
-      // cannot inherit a stale asset from a previous assessment.
-      setSelectedAssetId(data.asset.id);
-      setTestAssetId(data.asset.id);
-
-      setView("overview");
-    } catch (err) {
-      console.error(err);
-      setEngagementError(
-        err instanceof Error
-          ? err.message
-          : "Unable to start the security assessment",
-      );
-    } finally {
-      setAssessmentStarting(false);
-    }
-  }
-
-  React.useEffect(() => {
-    if (!activeEngagementId) return;
 
     async function loadDashboard() {
       try {
@@ -809,15 +774,15 @@ function App() {
           findingsData,
         ] = await Promise.all([
           fetchJson<Dashboard>(
-            `/engagements/${activeEngagementId}/dashboard`,
+            `/engagements/${engagementId}/dashboard`,
           ),
 
           fetchJson<Service[]>(
-            `/engagements/${activeEngagementId}/services`,
+            `/engagements/${engagementId}/services`,
           ),
 
           fetchJson<Finding[]>(
-            `/engagements/${activeEngagementId}/findings`,
+            `/engagements/${engagementId}/findings`,
           ),
         ]);
 
@@ -830,7 +795,7 @@ function App() {
         console.error(err);
 
         setError(
-          "Unable to load the active VANTA assessment",
+          "Unable to reach VANTA backend",
         );
       } finally {
         setLoading(false);
@@ -838,10 +803,10 @@ function App() {
     }
 
     loadDashboard();
-  }, [activeEngagementId]);
+  }, [engagementId]);
 
   React.useEffect(() => {
-    if (!activeEngagementId || view !== "activities") {
+    if (!engagementId || view !== "activities") {
       return;
     }
 
@@ -850,7 +815,7 @@ function App() {
         setActivitiesLoading(true);
 
         const data = await fetchJson<ActivityRecord[]>(
-          `/engagements/${activeEngagementId}/activities`,
+          `/engagements/${engagementId}/activities`,
         );
 
         setActivities(data);
@@ -870,10 +835,10 @@ function App() {
     }
 
     loadActivities();
-  }, [activeEngagementId, view]);
+  }, [view, engagementId]);
 
   React.useEffect(() => {
-    if (!activeEngagementId || view !== "findings") {
+    if (!engagementId || view !== "findings") {
       return;
     }
 
@@ -884,10 +849,10 @@ function App() {
         const [findingsData, assetsData] =
           await Promise.all([
             fetchJson<Finding[]>(
-              `/engagements/${activeEngagementId}/findings`,
+              `/engagements/${engagementId}/findings`,
             ),
             fetchJson<Asset[]>(
-              `/engagements/${activeEngagementId}/assets`,
+              `/engagements/${engagementId}/assets`,
             ),
           ]);
 
@@ -914,10 +879,10 @@ function App() {
     }
 
     loadFindingsWorkspace();
-  }, [view]);
+  }, [view, engagementId]);
 
   React.useEffect(() => {
-    if (!activeEngagementId || view !== "findings" || !selectedFindingId) {
+    if (!engagementId || view !== "findings" || !selectedFindingId) {
       setFindingProvenance(null);
       setFindingProvenanceError(null);
       return;
@@ -928,7 +893,7 @@ function App() {
         setFindingProvenanceLoading(true);
 
         const data = await fetchJson<FindingProvenance>(
-          `/engagements/${activeEngagementId}/findings/${selectedFindingId}/provenance`,
+          `/engagements/${engagementId}/findings/${selectedFindingId}/provenance`,
         );
 
         setFindingProvenance(data);
@@ -945,10 +910,10 @@ function App() {
     }
 
     loadFindingProvenance();
-  }, [activeEngagementId, view, selectedFindingId]);
+  }, [view, selectedFindingId, engagementId]);
 
   React.useEffect(() => {
-    if (!activeEngagementId || view !== "evidence") {
+    if (!engagementId || view !== "evidence") {
       return;
     }
 
@@ -958,10 +923,10 @@ function App() {
 
         const [data, assetsData] = await Promise.all([
           fetchJson<Evidence[]>(
-            `/engagements/${activeEngagementId}/evidence`,
+            `/engagements/${engagementId}/evidence`,
           ),
           fetchJson<Asset[]>(
-            `/engagements/${activeEngagementId}/assets`,
+            `/engagements/${engagementId}/assets`,
           ),
         ]);
 
@@ -983,10 +948,10 @@ function App() {
     }
 
     loadEvidenceWorkspace();
-  }, [activeEngagementId, view]);
+  }, [view, engagementId]);
 
   React.useEffect(() => {
-    if (!activeEngagementId || view !== "attack-surface") {
+    if (!engagementId || view !== "attack-surface") {
       return;
     }
 
@@ -997,38 +962,44 @@ function App() {
         const [
           assetsData,
           servicesData,
+          httpServicesData,
           scopesData,
           relationshipsData,
           findingsData,
           evidenceData,
         ] = await Promise.all([
           fetchJson<Asset[]>(
-            `/engagements/${activeEngagementId}/assets`,
+            `/engagements/${engagementId}/assets`,
           ),
 
           fetchJson<Service[]>(
-            `/engagements/${activeEngagementId}/services`,
+            `/engagements/${engagementId}/services`,
+          ),
+
+          fetchJson<HttpService[]>(
+            `/engagements/${engagementId}/http-services`,
           ),
 
           fetchJson<Scope[]>(
-            `/engagements/${activeEngagementId}/scope`,
+            `/engagements/${engagementId}/scope`,
           ),
 
           fetchJson<AssetRelationship[]>(
-            `/engagements/${activeEngagementId}/relationships`,
+            `/engagements/${engagementId}/relationships`,
           ),
 
           fetchJson<Finding[]>(
-            `/engagements/${activeEngagementId}/findings`,
+            `/engagements/${engagementId}/findings`,
           ),
 
           fetchJson<Evidence[]>(
-            `/engagements/${activeEngagementId}/evidence`,
+            `/engagements/${engagementId}/evidence`,
           ),
         ]);
 
         setAssets(assetsData);
         setServices(servicesData);
+        setHttpServices(httpServicesData);
         setScopes(scopesData);
         setAssetRelationships(relationshipsData);
         setFindings(findingsData);
@@ -1056,10 +1027,10 @@ function App() {
     }
 
     loadAttackSurface();
-  }, [activeEngagementId, view]);
+  }, [view, engagementId]);
 
   React.useEffect(() => {
-    if (!activeEngagementId || view !== "testing") {
+    if (!engagementId || view !== "testing") {
       return;
     }
 
@@ -1067,10 +1038,10 @@ function App() {
       try {
         const [assetsData, scopesData] = await Promise.all([
           fetchJson<Asset[]>(
-            `/engagements/${activeEngagementId}/assets`,
+            `/engagements/${engagementId}/assets`,
           ),
           fetchJson<Scope[]>(
-            `/engagements/${activeEngagementId}/scope`,
+            `/engagements/${engagementId}/scope`,
           ),
         ]);
 
@@ -1098,7 +1069,7 @@ function App() {
   }, [view]);
 
   React.useEffect(() => {
-    if (!activeEngagementId || view !== "testing" || !selectedTestingItem) {
+    if (!engagementId || view !== "testing" || !selectedTestingItem) {
       setTestingTrace(null);
       setTestingTraceError(null);
       return;
@@ -1112,7 +1083,7 @@ function App() {
         setTestingTraceError(null);
 
         const data = await fetchJson<CoverageTraceability>(
-          `/engagements/${activeEngagementId}/coverage/${testingItem.area}/${testingItem.test}`,
+          `/engagements/${engagementId}/coverage/${testingItem.area}/${testingItem.test}`,
         );
 
         setTestingTrace(data);
@@ -1128,10 +1099,10 @@ function App() {
     }
 
     loadTestingTraceability();
-  }, [activeEngagementId, view, selectedTestingItem, testingTraceVersion]);
+  }, [view, selectedTestingItem, testingTraceVersion, engagementId]);
 
   React.useEffect(() => {
-    if (!activeEngagementId || view !== "coverage" || !selectedCoverageItem) {
+    if (!engagementId || view !== "coverage" || !selectedCoverageItem) {
       setCoverageTrace(null);
       setCoverageTraceError(null);
       return;
@@ -1145,7 +1116,7 @@ function App() {
         setCoverageTraceError(null);
 
         const data = await fetchJson<CoverageTraceability>(
-          `/engagements/${activeEngagementId}/coverage/${coverageItem.area}/${coverageItem.test}`,
+          `/engagements/${engagementId}/coverage/${coverageItem.area}/${coverageItem.test}`,
         );
 
         setCoverageTrace(data);
@@ -1161,13 +1132,7 @@ function App() {
     }
 
     loadCoverageTraceability();
-  }, [activeEngagementId, view, selectedCoverageItem]);
-
-  function shortId(value: string | null | undefined): string {
-    return typeof value === "string" && value.length > 0
-      ? value.slice(0, 8)
-      : "—";
-  }
+  }, [view, selectedCoverageItem, engagementId]);
 
   function coverageTestLabel(value: string) {
     return value
@@ -1182,10 +1147,10 @@ function App() {
   const coveragePercent =
     coverageTotal > 0
       ? Math.round(
-        (dashboard.testing.tested /
-          coverageTotal) *
-        100,
-      )
+          (dashboard.testing.tested /
+            coverageTotal) *
+            100,
+        )
       : 0;
 
   function getScopeType(
@@ -1248,6 +1213,15 @@ function App() {
     );
   }
 
+  function getAssetHttpServices(
+    assetId: string,
+  ) {
+    return httpServices.filter(
+      (service) =>
+        service.asset_id === assetId,
+    );
+  }
+
   const filteredAssets = assets.filter(
     (asset) => {
       const scopeType =
@@ -1266,6 +1240,9 @@ function App() {
 
       const assetServices =
         getAssetServices(asset.id);
+
+      const assetHttpServices =
+        getAssetHttpServices(asset.id);
 
       const matchesAsset =
         asset.value
@@ -1292,10 +1269,34 @@ function App() {
               .includes(query),
         );
 
+      const matchesHttpService =
+        assetHttpServices.some(
+          (service) =>
+            service.url
+              .toLowerCase()
+              .includes(query) ||
+            (service.title ?? "")
+              .toLowerCase()
+              .includes(query) ||
+            (service.webserver ?? "")
+              .toLowerCase()
+              .includes(query) ||
+            (service.scheme ?? "")
+              .toLowerCase()
+              .includes(query) ||
+            (service.port ?? "")
+              .toString()
+              .includes(query) ||
+            (service.status_code ?? "")
+              .toString()
+              .includes(query),
+        );
+
       return (
         matchesScope &&
         (matchesAsset ||
-          matchesService)
+          matchesService ||
+          matchesHttpService)
       );
     },
   );
@@ -1309,19 +1310,26 @@ function App() {
   const selectedServices =
     selectedAsset
       ? getAssetServices(
-        selectedAsset.id,
-      )
+          selectedAsset.id,
+        )
+      : [];
+
+  const selectedHttpServices =
+    selectedAsset
+      ? getAssetHttpServices(
+          selectedAsset.id,
+        )
       : [];
 
   const selectedRelationships =
     selectedAsset
       ? assetRelationships.filter(
-        (relationship) =>
-          relationship.source_asset_id ===
-          selectedAsset.id ||
-          relationship.target_asset_id ===
-          selectedAsset.id,
-      )
+          (relationship) =>
+            relationship.source_asset_id ===
+              selectedAsset.id ||
+            relationship.target_asset_id ===
+              selectedAsset.id,
+        )
       : [];
 
   function getRelationshipAsset(
@@ -1398,7 +1406,10 @@ function App() {
       assets.find(
         (asset) => asset.id === activity.asset_id,
       )?.value ??
-      "UNKNOWN ASSET"
+      (activity.asset_id ===
+      "72b0dd6e-be9d-425a-86a8-41e70c779b50"
+        ? "example.com"
+        : "UNKNOWN ASSET")
     );
   }
 
@@ -1461,7 +1472,10 @@ function App() {
       assets.find(
         (asset) => asset.id === finding.asset_id,
       )?.value ??
-      "UNKNOWN ASSET"
+      (finding.asset_id ===
+      "72b0dd6e-be9d-425a-86a8-41e70c779b50"
+        ? "example.com"
+        : "UNKNOWN ASSET")
     );
   }
 
@@ -1549,7 +1563,10 @@ function App() {
 
     return (
       assets.find((asset) => asset.id === item.asset_id)?.value ??
-      "UNKNOWN ASSET"
+      (item.asset_id ===
+      "72b0dd6e-be9d-425a-86a8-41e70c779b50"
+        ? "example.com"
+        : "UNKNOWN ASSET")
     );
   }
 
@@ -1591,9 +1608,49 @@ function App() {
         finding.id === selectedFindingId,
     ) ?? null;
 
+  async function createEngagement() {
+    const name = newEngagementName.trim();
+    if (!name) {
+      setEngagementError("Engagement name is required.");
+      return;
+    }
+
+    try {
+      setCreatingEngagement(true);
+      setEngagementError(null);
+
+      const created = await fetchJson<Engagement>("/engagements", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name,
+          client: newEngagementClient.trim() || null,
+          description: newEngagementDescription.trim() || null,
+        }),
+      });
+
+      setEngagements((current) => [created, ...current]);
+      setSelectedEngagementId(created.id);
+      setCreateEngagementOpen(false);
+      setNewEngagementName("");
+      setNewEngagementClient("");
+      setNewEngagementDescription("");
+      setView("overview");
+    } catch (err) {
+      console.error(err);
+      setEngagementError(
+        err instanceof Error ? err.message : "Unable to create engagement",
+      );
+    } finally {
+      setCreatingEngagement(false);
+    }
+  }
+
   async function validateFinding(findingId: string) {
-    if (!activeEngagementId) {
-      setFindingActionError("No active assessment is selected.");
+    if (!engagementId) {
+      setFindingActionError("Select an engagement first.");
       return;
     }
 
@@ -1602,7 +1659,7 @@ function App() {
       setFindingActionError(null);
 
       const updated = await fetchJson<Finding>(
-        `/engagements/${activeEngagementId}/findings/${findingId}/validate`,
+        `/engagements/${engagementId}/findings/${findingId}/validate`,
         {
           method: "POST",
         },
@@ -1626,8 +1683,8 @@ function App() {
   }
 
   async function startFindingRetest(findingId: string) {
-    if (!activeEngagementId) {
-      setFindingActionError("No active assessment is selected.");
+    if (!engagementId) {
+      setFindingActionError("Select an engagement first.");
       return;
     }
 
@@ -1636,7 +1693,7 @@ function App() {
       setFindingActionError(null);
 
       const updated = await fetchJson<Finding>(
-        `/engagements/${activeEngagementId}/findings/${findingId}/retest`,
+        `/engagements/${engagementId}/findings/${findingId}/retest`,
         {
           method: "POST",
         },
@@ -1663,8 +1720,8 @@ function App() {
     findingId: string,
     result: "passed" | "failed",
   ) {
-    if (!activeEngagementId) {
-      setFindingActionError("No active assessment is selected.");
+    if (!engagementId) {
+      setFindingActionError("Select an engagement first.");
       return;
     }
 
@@ -1673,7 +1730,7 @@ function App() {
       setFindingActionError(null);
 
       const updated = await fetchJson<Finding>(
-        `/engagements/${activeEngagementId}/findings/${findingId}/retest/result`,
+        `/engagements/${engagementId}/findings/${findingId}/retest/result`,
         {
           method: "POST",
           headers: {
@@ -1716,18 +1773,13 @@ function App() {
   }, [assets, testAssetId]);
 
   async function executeTest() {
-    if (!activeEngagementId) {
-      setTestError("No active assessment is selected.");
+    if (!engagementId) {
+      setTestError("Select an engagement before executing a test.");
       return;
     }
 
     if (!testAssetId) {
       setTestError("Select an asset before executing a test.");
-      return;
-    }
-
-    if (!isExecutableTest(selectedTestingItem)) {
-      setTestError("No execution adapter is connected to this objective.");
       return;
     }
 
@@ -1744,52 +1796,22 @@ function App() {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            engagement_id: activeEngagementId,
+            engagement_id: engagementId,
             asset_id: testAssetId,
             tool: testTool,
             title: testTitle,
-            // Subfinder is a discovery operation in the backend contract.
-            // Other executable testing adapters use testing mode.
-            execution_mode:
-              testTool === "subfinder" ? "discovery" : "testing",
-            // Subfinder requires an explicit discovery target.
-            // The other adapters resolve their target from asset_id.
-            ...(testTool === "subfinder"
-              ? {
-                target:
-                  assets.find((asset) => asset.id === testAssetId)?.value ??
-                  "",
-              }
-              : {}),
+            execution_mode: "testing",
             testing_area: selectedTestingItem.area,
             test_type: selectedTestingItem.test,
           }),
         },
       );
 
-      const normalizedResult: ToolEventResponse = {
-        ...result,
-        activity_id:
-          typeof result.activity_id === "string"
-            ? result.activity_id
-            : result.activity?.id ?? "",
-        evidence_id:
-          typeof result.evidence_id === "string"
-            ? result.evidence_id
-            : result.evidence?.id ?? "",
-        discovered_services: Array.isArray(result.discovered_services)
-          ? result.discovered_services
-          : [],
-        endpoints: Array.isArray(result.endpoints)
-          ? result.endpoints
-          : [],
-      };
-
-      setTestResult(normalizedResult);
+      setTestResult(result);
 
       const [servicesData, dashboardData] = await Promise.all([
-        fetchJson<Service[]>(`/engagements/${activeEngagementId}/services`),
-        fetchJson<Dashboard>(`/engagements/${activeEngagementId}/dashboard`),
+        fetchJson<Service[]>(`/engagements/${engagementId}/services`),
+        fetchJson<Dashboard>(`/engagements/${engagementId}/dashboard`),
       ]);
 
       setServices(servicesData);
@@ -1824,6 +1846,92 @@ function App() {
 
   return (
     <div className="vanta-app">
+      {createEngagementOpen && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 1000,
+            display: "grid",
+            placeItems: "center",
+            padding: 20,
+            background: "rgba(0, 0, 0, 0.68)",
+            backdropFilter: "blur(8px)",
+          }}
+        >
+          <div
+            style={{
+              width: "min(520px, 100%)",
+              border: "1px solid #2b3038",
+              borderRadius: 12,
+              background: "#0d1015",
+              boxShadow: "0 30px 90px rgba(0,0,0,.45)",
+              padding: 20,
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+              <div>
+                <div style={{ color: "#737d8d", fontSize: 8, fontFamily: '"JetBrains Mono", monospace', letterSpacing: ".12em" }}>
+                  NEW ENGAGEMENT
+                </div>
+                <h2 style={{ margin: "6px 0 0", color: "#e8e9eb", fontSize: 17 }}>
+                  Create assessment workspace
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCreateEngagementOpen(false)}
+                style={{ border: 0, background: "transparent", color: "#737d8d", cursor: "pointer" }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {engagementError && (
+              <div style={{ marginBottom: 12, color: "#ff7479", fontSize: 11 }}>
+                {engagementError}
+              </div>
+            )}
+
+            <div style={{ display: "grid", gap: 11 }}>
+              <input
+                value={newEngagementName}
+                onChange={(event) => setNewEngagementName(event.target.value)}
+                placeholder="Engagement name *"
+                autoFocus
+              />
+              <input
+                value={newEngagementClient}
+                onChange={(event) => setNewEngagementClient(event.target.value)}
+                placeholder="Client / organization"
+              />
+              <textarea
+                value={newEngagementDescription}
+                onChange={(event) => setNewEngagementDescription(event.target.value)}
+                placeholder="Assessment description"
+                rows={4}
+              />
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 9, marginTop: 16 }}>
+              <button
+                type="button"
+                onClick={() => setCreateEngagementOpen(false)}
+                disabled={creatingEngagement}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={createEngagement}
+                disabled={creatingEngagement || !newEngagementName.trim()}
+              >
+                {creatingEngagement ? "Creating..." : "Create engagement"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {mobileMenuOpen && (
         <button
           className="mobile-overlay"
@@ -1833,10 +1941,11 @@ function App() {
       )}
 
       <aside
-        className={`sidebar ${mobileMenuOpen
-          ? "sidebar-open"
-          : ""
-          }`}
+        className={`sidebar ${
+          mobileMenuOpen
+            ? "sidebar-open"
+            : ""
+        }`}
       >
         <div className="mobile-sidebar-header">
           <span>VANTA</span>
@@ -1871,12 +1980,54 @@ function App() {
             ENGAGEMENT
           </span>
 
-          <div className="workspace-name">
-            <span>
-              ACME / WEB-PENTEST
-            </span>
+          <div className="workspace-name" style={{ gap: 6 }}>
+            <select
+              value={selectedEngagementId ?? ""}
+              onChange={(event) => {
+                setSelectedEngagementId(event.target.value || null);
+                setView("overview");
+              }}
+              disabled={engagementsLoading}
+              aria-label="Select engagement"
+              style={{
+                flex: 1,
+                minWidth: 0,
+                border: "1px solid #2a2e35",
+                borderRadius: 6,
+                background: "#111317",
+                color: "#d7d9dc",
+                padding: "6px 7px",
+                fontFamily: '"JetBrains Mono", monospace',
+                fontSize: 9,
+                outline: "none",
+              }}
+            >
+              <option value="">NO ENGAGEMENT</option>
+              {engagements.map((engagement) => (
+                <option key={engagement.id} value={engagement.id}>
+                  {engagement.name}
+                </option>
+              ))}
+            </select>
 
-            <ChevronRight size={14} />
+            <button
+              type="button"
+              onClick={() => setCreateEngagementOpen(true)}
+              title="Create engagement"
+              style={{
+                flex: "0 0 auto",
+                border: "1px solid #33373d",
+                borderRadius: 6,
+                background: "#15181d",
+                color: "#aeb3bb",
+                padding: "6px 8px",
+                cursor: "pointer",
+                fontFamily: '"JetBrains Mono", monospace',
+                fontSize: 9,
+              }}
+            >
+              +
+            </button>
           </div>
         </div>
 
@@ -1886,10 +2037,11 @@ function App() {
           </div>
 
           <button
-            className={`nav-item ${view === "overview"
-              ? "active"
-              : ""
-              }`}
+            className={`nav-item ${
+              view === "overview"
+                ? "active"
+                : ""
+            }`}
             onClick={() =>
               navigate("overview")
             }
@@ -1899,10 +2051,11 @@ function App() {
           </button>
 
           <button
-            className={`nav-item ${view === "attack-surface"
-              ? "active"
-              : ""
-              }`}
+            className={`nav-item ${
+              view === "attack-surface"
+                ? "active"
+                : ""
+            }`}
             onClick={() =>
               navigate("attack-surface")
             }
@@ -1912,10 +2065,11 @@ function App() {
           </button>
 
           <button
-            className={`nav-item ${view === "testing"
-              ? "active"
-              : ""
-              }`}
+            className={`nav-item ${
+              view === "testing"
+                ? "active"
+                : ""
+            }`}
             onClick={() => navigate("testing")}
           >
             <Terminal size={17} />
@@ -1923,10 +2077,11 @@ function App() {
           </button>
 
           <button
-            className={`nav-item ${view === "activities"
-              ? "active"
-              : ""
-              }`}
+            className={`nav-item ${
+              view === "activities"
+                ? "active"
+                : ""
+            }`}
             onClick={() =>
               navigate("activities")
             }
@@ -1940,10 +2095,11 @@ function App() {
           </div>
 
           <button
-            className={`nav-item ${view === "findings"
-              ? "active"
-              : ""
-              }`}
+            className={`nav-item ${
+              view === "findings"
+                ? "active"
+                : ""
+            }`}
             onClick={() =>
               navigate("findings")
             }
@@ -1958,10 +2114,11 @@ function App() {
           </button>
 
           <button
-            className={`nav-item ${view === "evidence"
-              ? "active"
-              : ""
-              }`}
+            className={`nav-item ${
+              view === "evidence"
+                ? "active"
+                : ""
+            }`}
             onClick={() =>
               navigate("evidence")
             }
@@ -1971,10 +2128,11 @@ function App() {
           </button>
 
           <button
-            className={`nav-item ${view === "coverage"
-              ? "active"
-              : ""
-              }`}
+            className={`nav-item ${
+              view === "coverage"
+                ? "active"
+                : ""
+            }`}
             onClick={() =>
               navigate("coverage")
             }
@@ -2019,6 +2177,25 @@ function App() {
         </div>
       </aside>
 
+      {!engagementId && !engagementsLoading && (
+        <div style={{ padding: "18px 22px 0" }}>
+          <div className="panel" style={{ marginBottom: 10 }}>
+            <div className="panel-header">
+              <div>
+                <span className="eyebrow">FIRST RUN</span>
+                <h2>Create your first engagement</h2>
+              </div>
+              <button type="button" className="panel-action" onClick={() => setCreateEngagementOpen(true)}>
+                CREATE ENGAGEMENT <ChevronRight size={12} />
+              </button>
+            </div>
+            <p style={{ color: "#737d8d", fontSize: 11, lineHeight: 1.6, margin: 0 }}>
+              VANTA is ready. Create an engagement to define a security assessment workspace, scope targets, run testing, collect evidence, and track findings.
+            </p>
+          </div>
+        </div>
+      )}
+
       <main className="main-content">
         <header className="topbar">
           <div className="mobile-brand">
@@ -2048,18 +2225,18 @@ function App() {
               {view === "attack-surface"
                 ? "ATTACK SURFACE"
                 : view === "testing"
-                  ? "TESTING"
-                  : view === "activities"
-                    ? "ACTIVITY LOG"
-                    : view === "findings"
-                      ? "FINDINGS"
-                      : view === "evidence"
-                        ? "EVIDENCE"
-                        : view === "coverage"
-                          ? "COVERAGE"
-                          : view === "reports"
-                            ? "REPORTS"
-                            : dashboard.engagement.name.toUpperCase()}
+                ? "TESTING"
+                : view === "activities"
+                ? "ACTIVITY LOG"
+                : view === "findings"
+                ? "FINDINGS"
+                : view === "evidence"
+                ? "EVIDENCE"
+                : view === "coverage"
+                ? "COVERAGE"
+                : view === "reports"
+                ? "REPORTS"
+                : (engagements.find((item) => item.id === engagementId)?.name ?? "NO ENGAGEMENT")}
             </strong>
           </div>
 
@@ -2085,88 +2262,7 @@ function App() {
           </div>
         </header>
 
-        {engagementLoading && (
-          <section className="page">
-            <div className="testing-trace-loading">
-              <strong>LOADING ACTIVE ASSESSMENT</strong>
-              <span>Resolving the current VANTA engagement...</span>
-            </div>
-          </section>
-        )}
-
-        {!engagementLoading && !activeEngagementId && (
-          <section className="target-start-screen">
-            <div className="target-start-card">
-              <div className="target-start-kicker">
-                <CircleDot size={13} />
-                VANTA / NEW ASSESSMENT
-              </div>
-
-              <h1>START SECURITY ASSESSMENT</h1>
-
-              <p>
-                Establish the primary target before entering the VANTA
-                workspace. Existing assessments are preserved; this session
-                will not silently resume an older engagement.
-              </p>
-
-              <label className="target-start-label">
-                PRIMARY TARGET
-              </label>
-
-              <input
-                className="target-start-input"
-                value={assessmentTarget}
-                onChange={(event) => {
-                  setAssessmentTarget(event.target.value);
-                  if (engagementError) setEngagementError(null);
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && !assessmentStarting) {
-                    startAssessment();
-                  }
-                }}
-                placeholder="example.com"
-                autoFocus
-                disabled={assessmentStarting}
-              />
-
-              {engagementError && (
-                <div className="error-banner target-start-error">
-                  <AlertTriangle size={16} />
-                  {engagementError}
-                </div>
-              )}
-
-              <button
-                className="testing-execute-button target-start-button"
-                onClick={startAssessment}
-                disabled={assessmentStarting || !assessmentTarget.trim()}
-              >
-                <Terminal size={17} />
-                {assessmentStarting
-                  ? "STARTING ASSESSMENT..."
-                  : "START ASSESSMENT"}
-              </button>
-
-              <div className="target-start-note">
-                <ShieldCheck size={14} />
-                Only assess systems you are authorized to test.
-              </div>
-            </div>
-          </section>
-        )}
-
-        {!engagementLoading && activeEngagementId && engagementError && (
-          <section className="page">
-            <div className="error-banner">
-              <AlertTriangle size={16} />
-              {engagementError}
-            </div>
-          </section>
-        )}
-
-        {!engagementLoading && activeEngagementId && view === "overview" && (
+        {view === "overview" && (
           <section className="page">
             <div className="hero">
               <div className="hero-main">
@@ -2360,12 +2456,14 @@ function App() {
                     style={{
                       background:
                         `conic-gradient(
-                          #d94b4b ${coveragePercent *
-                        3.6
-                        }deg,
-                          #24272c ${coveragePercent *
-                        3.6
-                        }deg
+                          #d94b4b ${
+                            coveragePercent *
+                            3.6
+                          }deg,
+                          #24272c ${
+                            coveragePercent *
+                            3.6
+                          }deg
                         )`,
                     }}
                   >
@@ -2407,10 +2505,10 @@ function App() {
                       const percentage =
                         total > 0
                           ? Math.round(
-                            (tested /
-                              total) *
-                            100,
-                          )
+                              (tested /
+                                total) *
+                                100,
+                            )
                           : 0;
 
                       return (
@@ -2596,7 +2694,7 @@ function App() {
           </section>
         )}
 
-        {!engagementLoading && activeEngagementId && view === "attack-surface" && (
+        {view === "attack-surface" && (
           <section className="page attack-surface-page">
             <div className="surface-hero">
               <div>
@@ -2650,6 +2748,16 @@ function App() {
                   </strong>
 
                   <span>OPEN</span>
+                </div>
+
+                <div>
+                  <strong>
+                    {httpServices.length
+                      .toString()
+                      .padStart(2, "0")}
+                  </strong>
+
+                  <span>HTTP</span>
                 </div>
               </div>
             </div>
@@ -2730,8 +2838,8 @@ function App() {
                 </strong>
 
                 <span>
-                  Loading assets, scope and
-                  service inventory...
+                  Loading assets, scope, network and
+                  HTTP service inventory...
                 </span>
               </div>
             ) : (
@@ -2756,7 +2864,7 @@ function App() {
 
                   <div className="asset-list">
                     {filteredAssets.length ===
-                      0 ? (
+                    0 ? (
                       <div className="empty-surface">
                         <Search size={24} />
 
@@ -2788,10 +2896,11 @@ function App() {
 
                           return (
                             <button
-                              className={`asset-card ${isSelected
-                                ? "asset-selected"
-                                : ""
-                                }`}
+                              className={`asset-card ${
+                                isSelected
+                                  ? "asset-selected"
+                                  : ""
+                              }`}
                               key={asset.id}
                               onClick={() =>
                                 setSelectedAssetId(
@@ -2801,7 +2910,7 @@ function App() {
                             >
                               <div className="asset-card-icon">
                                 {asset.asset_type ===
-                                  "domain" ? (
+                                "domain" ? (
                                   <Globe
                                     size={17}
                                   />
@@ -2835,7 +2944,7 @@ function App() {
                                     }{" "}
                                     service
                                     {assetServices.length ===
-                                      1
+                                    1
                                       ? ""
                                       : "s"}
                                   </span>
@@ -3054,7 +3163,7 @@ function App() {
                         </div>
 
                         {selectedServices.length ===
-                          0 ? (
+                        0 ? (
                           <div className="no-services">
                             <Server
                               size={20}
@@ -3115,6 +3224,102 @@ function App() {
                         <div className="detail-section-heading">
                           <div>
                             <span className="panel-kicker">
+                              HTTP INVENTORY
+                            </span>
+
+                            <h3>
+                              Web Services
+                            </h3>
+                          </div>
+
+                          <span className="service-total">
+                            {selectedHttpServices.length}{" "}
+                            HTTP{" "}
+                            {selectedHttpServices.length === 1
+                              ? "SERVICE"
+                              : "SERVICES"}
+                          </span>
+                        </div>
+
+                        {selectedHttpServices.length === 0 ? (
+                          <div className="no-services">
+                            <Globe size={20} />
+
+                            <span>
+                              No HTTP services have been
+                              identified for this asset yet.
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="detail-services">
+                            {selectedHttpServices.map(
+                              (httpService) => {
+                                const statusCode =
+                                  httpService.status_code;
+
+                                const statusLabel =
+                                  statusCode !== null
+                                    ? statusCode.toString()
+                                    : "—";
+
+                                const statusClass =
+                                  statusCode !== null &&
+                                  statusCode >= 200 &&
+                                  statusCode < 400
+                                    ? "detail-service-state"
+                                    : "detail-service-state";
+
+                                return (
+                                  <div
+                                    className="detail-service"
+                                    key={httpService.id}
+                                  >
+                                    <div className="service-port-large">
+                                      <Globe size={17} />
+                                    </div>
+
+                                    <div className="detail-service-info">
+                                      <strong>
+                                        {httpService.url}
+                                      </strong>
+
+                                      <span>
+                                        {[
+                                          httpService.scheme?.toUpperCase(),
+                                          httpService.port
+                                            ? `PORT ${httpService.port}`
+                                            : null,
+                                          httpService.webserver,
+                                        ]
+                                          .filter(Boolean)
+                                          .join(" / ") || "HTTP SERVICE"}
+                                      </span>
+
+                                      {httpService.title && (
+                                        <small>
+                                          {httpService.title}
+                                        </small>
+                                      )}
+                                    </div>
+
+                                    <div className={statusClass}>
+                                      <span />
+                                      {statusLabel}
+                                    </div>
+                                  </div>
+                                );
+                              },
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="detail-divider" />
+
+                      <div className="detail-section">
+                        <div className="detail-section-heading">
+                          <div>
+                            <span className="panel-kicker">
                               TESTING SIGNAL
                             </span>
 
@@ -3154,13 +3359,14 @@ function App() {
                                 <div className="surface-coverage-bar">
                                   <span
                                     style={{
-                                      width: `${values.length > 0
-                                        ? Math.round(
-                                          (tested / values.length) *
-                                          100,
-                                        )
-                                        : 0
-                                        }%`,
+                                      width: `${
+                                        values.length > 0
+                                          ? Math.round(
+                                              (tested / values.length) *
+                                                100,
+                                            )
+                                          : 0
+                                      }%`,
                                     }}
                                   />
                                 </div>
@@ -3271,7 +3477,7 @@ function App() {
                           {getScopeType(
                             selectedAsset,
                           ) ===
-                            "include" ? (
+                          "include" ? (
                             <Check size={18} />
                           ) : (
                             <AlertTriangle
@@ -3284,12 +3490,12 @@ function App() {
                               {getScopeType(
                                 selectedAsset,
                               ) ===
-                                "include"
+                              "include"
                                 ? "Explicitly included in assessment scope"
                                 : getScopeType(
-                                  selectedAsset,
-                                ) ===
-                                  "exclude"
+                                      selectedAsset,
+                                    ) ===
+                                    "exclude"
                                   ? "Explicitly excluded from assessment scope"
                                   : "Discovered but not explicitly listed in assessment scope"}
                             </strong>
@@ -3310,7 +3516,7 @@ function App() {
         )}
 
 
-        {!engagementLoading && activeEngagementId && view === "testing" && (
+        {view === "testing" && (
           <section className="page testing-page">
             <div className="testing-hero">
               <div>
@@ -3371,8 +3577,9 @@ function App() {
                             return (
                               <button
                                 key={`${area}-${test}`}
-                                className={`testing-taxonomy-item ${selected ? "testing-taxonomy-item-selected" : ""
-                                  }`}
+                                className={`testing-taxonomy-item ${
+                                  selected ? "testing-taxonomy-item-selected" : ""
+                                }`}
                                 onClick={() => {
                                   setSelectedTestingItem({ area, test });
                                   setTestError(null);
@@ -3380,10 +3587,11 @@ function App() {
                                 }}
                               >
                                 <span
-                                  className={`testing-status-dot ${status === "tested"
-                                    ? "testing-status-dot-tested"
-                                    : ""
-                                    }`}
+                                  className={`testing-status-dot ${
+                                    status === "tested"
+                                      ? "testing-status-dot-tested"
+                                      : ""
+                                  }`}
                                 >
                                   {status === "tested" ? (
                                     <Check size={10} />
@@ -3421,10 +3629,11 @@ function App() {
                     </h2>
                   </div>
                   <span
-                    className={`testing-objective-status ${testingTrace?.status === "tested"
-                      ? "testing-objective-status-tested"
-                      : ""
-                      }`}
+                    className={`testing-objective-status ${
+                      testingTrace?.status === "tested"
+                        ? "testing-objective-status-tested"
+                        : ""
+                    }`}
                   >
                     {testingTrace?.status === "tested" ? "TESTED" : "NOT TESTED"}
                   </span>
@@ -3501,7 +3710,7 @@ function App() {
                           </span>
                         </div>
                         <div className="testing-latest-meta">
-                          <span>ACTIVITY <strong>{shortId(testingTrace.activities[0].id)}</strong></span>
+                          <span>ACTIVITY <strong>{testingTrace.activities[0].id.slice(0, 8)}</strong></span>
                           <span>EVIDENCE <strong>{testingTrace.activities[0].evidence.length}</strong></span>
                           <span>STATUS <strong>{testingTrace.activities[0].status.toUpperCase()}</strong></span>
                         </div>
@@ -3564,10 +3773,36 @@ function App() {
 
                   <label className="testing-field testing-field-wide">
                     <span>TOOL</span>
-                    <div className="testing-tool-readonly">
-                      <strong>{toolDisplayName(testTool)}</strong>
-                      <span>{toolDescription(testTool)}</span>
-                    </div>
+                    {selectedTestingItem.area === "web" &&
+                    selectedTestingItem.test === "endpoint_discovery" ? (
+                      <div className="testing-readonly">
+                        Katana
+                      </div>
+                    ) : (
+                      <select
+                        value={testTool}
+                        onChange={(event) =>
+                          setTestTool(
+                            event.target.value as
+                              | "nmap"
+                              | "mock"
+                              | "katana",
+                          )
+                        }
+                      >
+                        <option
+                          value="nmap"
+                          disabled={
+                            selectedTestingItem.area !== "network" ||
+                            (selectedTestingItem.test !== "port_enumeration" &&
+                              selectedTestingItem.test !== "service_enumeration")
+                          }
+                        >
+                          Nmap
+                        </option>
+                        <option value="mock">Mock adapter</option>
+                      </select>
+                    )}
                   </label>
 
                   <div className="testing-field testing-field-wide">
@@ -3609,35 +3844,37 @@ function App() {
                   </div>
                 )}
 
-                {isExecutableTest(selectedTestingItem) ? (
-                  <button
-                    className="testing-execute-button"
-                    onClick={executeTest}
-                    disabled={testRunning || !testAssetId}
-                  >
-                    <Terminal size={17} />
-                    {testRunning ? "EXECUTING TEST..." : "EXECUTE TEST"}
-                  </button>
-                ) : (
-                  <div className="testing-no-adapter">
-                    <CircleDot size={15} />
-                    <div>
-                      <strong>ADAPTER NOT AVAILABLE</strong>
-                      <span>
-                        This testing objective is defined in the workflow but is not
-                        connected to an execution engine yet.
-                      </span>
-                    </div>
-                  </div>
-                )}
+                <button
+                  className="testing-execute-button"
+                  onClick={executeTest}
+                  disabled={
+                    testRunning ||
+                    !testAssetId ||
+                    !isExecutableTest(selectedTestingItem)
+                  }
+                >
+                  <Terminal size={17} />
+                  {testRunning ? "EXECUTING TEST..." : "EXECUTE TEST"}
+                </button>
 
-                {isExecutableTest(selectedTestingItem) && (
+                {!isExecutableTest(selectedTestingItem) ? (
+                  <p className="testing-adapter-note">
+                    This workflow objective is not connected to an execution adapter yet.
+                  </p>
+                ) : (
                   <div className="testing-pipeline">
                     {[
                       ["01", "Scope", "Target authorization"],
                       ["02", "Activity", "Tool operation"],
                       ["03", "Evidence", "Raw command output"],
-                      ["04", "Inventory", "Discovered services"],
+                      [
+                        "04",
+                        "Inventory",
+                        selectedTestingItem.area === "web" &&
+                        selectedTestingItem.test === "endpoint_discovery"
+                          ? "Discovered endpoints"
+                          : "Discovered services",
+                      ],
                     ].map(([number, title, detail]) => (
                       <div className="testing-pipeline-step" key={number}>
                         <span>{number}</span>
@@ -3665,9 +3902,20 @@ function App() {
                 <div className="testing-result-grid">
                   <div><span>TOOL</span><strong>{testResult.tool.toUpperCase()}</strong></div>
                   <div><span>TARGET</span><strong>{testResult.target}</strong></div>
-                  <div><span>ACTIVITY</span><strong>{testResult.activity_id?.slice(0, 8) || "—"}</strong></div>
-                  <div><span>EVIDENCE</span><strong>{testResult.evidence_id?.slice(0, 8) || "—"}</strong></div>
-                  <div><span>SERVICES DISCOVERED</span><strong>{testResult.discovered_services.length}</strong></div>
+                  <div><span>ACTIVITY</span><strong>{testResult.activity_id.slice(0, 8)}</strong></div>
+                  <div><span>EVIDENCE</span><strong>{testResult.evidence_id.slice(0, 8)}</strong></div>
+                  <div>
+                    <span>
+                      {testResult.test_type === "endpoint_discovery"
+                        ? "ENDPOINTS DISCOVERED"
+                        : "SERVICES DISCOVERED"}
+                    </span>
+                    <strong>
+                      {testResult.test_type === "endpoint_discovery"
+                        ? testResult.endpoints.length
+                        : testResult.discovered_services.length}
+                    </strong>
+                  </div>
                 </div>
 
                 {testResult.discovered_services.length > 0 && (
@@ -3682,12 +3930,64 @@ function App() {
                     ))}
                   </div>
                 )}
+
+                {testResult.endpoints.length > 0 && (
+                  <div className="testing-discovered-endpoints">
+                    <div className="testing-endpoints-header">
+                      <div>
+                        <span className="panel-kicker">
+                          ENDPOINT INVENTORY
+                        </span>
+                        <strong>
+                          {testResult.endpoints.length} endpoints discovered
+                        </strong>
+                      </div>
+                    </div>
+
+                    <div className="testing-endpoints-table">
+                      <div className="testing-endpoint-row testing-endpoint-header">
+                        <span>METHOD</span>
+                        <span>URL</span>
+                        <span>STATUS</span>
+                        <span>TYPE</span>
+                        <span>SOURCE</span>
+                      </div>
+
+                      {testResult.endpoints.map((endpoint) => (
+                        <div
+                          className="testing-endpoint-row"
+                          key={endpoint.id}
+                        >
+                          <span className="endpoint-method">
+                            {endpoint.method}
+                          </span>
+
+                          <span className="endpoint-url">
+                            {endpoint.url}
+                          </span>
+
+                          <span>
+                            {endpoint.status_code ?? "—"}
+                          </span>
+
+                          <span>
+                            {endpoint.content_type ?? "—"}
+                          </span>
+
+                          <span className="endpoint-source">
+                            {endpoint.source_url ?? "ROOT"}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </section>
             )}
           </section>
         )}
 
-        {!engagementLoading && activeEngagementId && view === "activities" && (
+        {view === "activities" && (
           <section className="page activities-page">
             <div className="activity-hero">
               <div>
@@ -3843,10 +4143,11 @@ function App() {
                           return (
                             <button
                               key={activity.id}
-                              className={`activity-record ${isSelected
-                                ? "activity-record-selected"
-                                : ""
-                                }`}
+                              className={`activity-record ${
+                                isSelected
+                                  ? "activity-record-selected"
+                                  : ""
+                              }`}
                               onClick={() =>
                                 setSelectedActivityId(
                                   activity.id,
@@ -3855,7 +4156,7 @@ function App() {
                             >
                               <div className="activity-record-marker">
                                 {activity.tool ===
-                                  "nmap" ? (
+                                "nmap" ? (
                                   <Network size={15} />
                                 ) : activity.activity_type ===
                                   "retest" ? (
@@ -3933,7 +4234,7 @@ function App() {
                       <div className="activity-detail-header">
                         <div className="activity-detail-icon">
                           {selectedActivity.tool ===
-                            "nmap" ? (
+                          "nmap" ? (
                             <Network size={20} />
                           ) : selectedActivity.activity_type ===
                             "retest" ? (
@@ -4080,7 +4381,7 @@ function App() {
           </section>
         )}
 
-        {!engagementLoading && activeEngagementId && view === "findings" && (
+        {view === "findings" && (
           <section className="page findings-page">
             <div className="findings-hero">
               <div>
@@ -4236,10 +4537,11 @@ function App() {
                           return (
                             <button
                               key={finding.id}
-                              className={`finding-card ${active
-                                ? "active"
-                                : ""
-                                }`}
+                              className={`finding-card ${
+                                active
+                                  ? "active"
+                                  : ""
+                              }`}
                               onClick={() =>
                                 setSelectedFindingId(
                                   finding.id,
@@ -4274,7 +4576,7 @@ function App() {
                                 <span
                                   className={
                                     finding.status ===
-                                      "closed"
+                                    "closed"
                                       ? "closed"
                                       : "open"
                                   }
@@ -4331,7 +4633,7 @@ function App() {
                         <span
                           className={
                             selectedFinding.status ===
-                              "closed"
+                            "closed"
                               ? "finding-state closed"
                               : "finding-state"
                           }
@@ -4668,7 +4970,7 @@ function App() {
           </section>
         )}
 
-        {!engagementLoading && activeEngagementId && view === "coverage" && (
+        {view === "coverage" && (
           <section
             className="page"
             style={{
@@ -4859,10 +5161,11 @@ function App() {
                   </div>
                   {coverageTrace && (
                     <span
-                      className={`scope-badge ${coverageTrace.status === "tested"
-                        ? "scope-in"
-                        : "scope-unknown"
-                        }`}
+                      className={`scope-badge ${
+                        coverageTrace.status === "tested"
+                          ? "scope-in"
+                          : "scope-unknown"
+                      }`}
                     >
                       <span />
                       {coverageTrace.status.toUpperCase()}
@@ -5035,7 +5338,7 @@ function App() {
           </section>
         )}
 
-        {!engagementLoading && activeEngagementId && view === "evidence" && (
+        {view === "evidence" && (
           <section className="page" style={{ display: "flex", flexDirection: "column", gap: 18 }}>
             <div className="surface-hero">
               <div>

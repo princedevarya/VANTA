@@ -5,11 +5,13 @@ from app.models.activity import Activity
 from app.models.evidence import Evidence
 from app.models.finding import Finding
 from app.models.service import Service
+from app.models.http_service import HttpService
 from app.models.asset_relationship import AssetRelationship
 from app.models.attack_path import AttackPath
 from app.models.attack_path_step import AttackPathStep
 from app.models.technology import Technology
 from app.models.finding_evidence import FindingEvidence
+from app.models.endpoint import Endpoint
 
 
 __all__ = [
@@ -20,6 +22,8 @@ __all__ = [
     "Evidence",
     "Finding",
     "Service",
+    "HttpService",
+    "Endpoint",
     "AssetRelationship",
     "AttackPath",
     "AttackPathStep",

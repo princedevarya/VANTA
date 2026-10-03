@@ -16,6 +16,7 @@ TESTING_TAXONOMY = {
         "network_configuration",
     ],
     "web": [
+        "endpoint_discovery",
         "authentication",
         "authorization",
         "session_management",
