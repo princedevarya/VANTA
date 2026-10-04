@@ -40,6 +40,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # VANTA application.
 COPY app ./app
+COPY healthcheck.py ./healthcheck.py
 
 # Runtime directories.
 RUN mkdir -p /app/reports
