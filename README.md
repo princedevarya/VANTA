@@ -49,3 +49,10 @@ git clone https://github.com/princedevarya/VANTA.git
 cd VANTA
 chmod +x scripts/start-vanta.sh
 ./scripts/start-vanta.sh
+
+## Updating VANTA
+
+If you already have VANTA installed, update it with:
+
+```bash
+./scripts/update-vanta.sh
