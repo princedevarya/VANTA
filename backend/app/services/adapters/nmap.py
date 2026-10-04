@@ -21,6 +21,7 @@ class NmapAdapter(ToolAdapter):
         if test_type == "port_enumeration":
             command_args = [
                 "nmap",
+                "-sT",
                 "-T4",
                 "--top-ports",
                 "1000",
@@ -28,11 +29,12 @@ class NmapAdapter(ToolAdapter):
                 target,
             ]
 
-            scan_profile = "top_1000_open"
+            scan_profile = "tcp_connect_top_1000_open"
 
         elif test_type == "service_enumeration":
             command_args = [
                 "nmap",
+                "-sT",
                 "-sV",
                 "-T4",
                 "--top-ports",
@@ -41,11 +43,12 @@ class NmapAdapter(ToolAdapter):
                 target,
             ]
 
-            scan_profile = "service_detection_top_1000"
+            scan_profile = "tcp_connect_service_detection_top_1000"
 
         elif test_type == "network_configuration":
             command_args = [
                 "nmap",
+                "-sT",
                 "-sV",
                 "-T4",
                 "--top-ports",
@@ -55,7 +58,7 @@ class NmapAdapter(ToolAdapter):
                 target,
             ]
 
-            scan_profile = "network_configuration_observation"
+            scan_profile = "tcp_connect_network_configuration_observation"
 
         else:
             raise ValueError(
@@ -70,15 +73,14 @@ class NmapAdapter(ToolAdapter):
 
         stdout, stderr = await process.communicate()
 
-        output = stdout.decode(
-            errors="replace"
-        )
+        output = stdout.decode(errors="replace")
 
         if stderr:
-            output += "\n[stderr]\n"
-            output += stderr.decode(
-                errors="replace"
-            )
+            if output:
+                output += "\n"
+
+            output += "[stderr]\n"
+            output += stderr.decode(errors="replace")
 
         return ToolResult(
             tool=self.name,
@@ -90,5 +92,7 @@ class NmapAdapter(ToolAdapter):
                 "execution_mode": "testing",
                 "test_type": test_type,
                 "scan_profile": scan_profile,
+                "scan_type": "tcp_connect",
+                "raw_socket_required": "false",
             },
         )
