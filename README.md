@@ -144,6 +144,8 @@ Planned development areas include:
 - Improving deployment documentation and operational security.
 
 Roadmap items may change as development progresses.
+<img width="1847" height="1016" alt="image" src="https://github.com/user-attachments/assets/3bf8d007-a7f0-41be-911a-e4f7b20599f2" />
+
 
 ## Project Status
 
